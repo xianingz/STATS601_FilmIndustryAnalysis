@@ -1,0 +1,157 @@
+1. Process meta data and remove duplciates by keeping the first one.
+```{r}
+meta <- read.table("E:/STATS601/project/id_metadata.txt", header = TRUE, sep = "\t", quote = "",comment.char = "")
+meta.unique <- meta[!duplicated(meta$id),]
+write.table(meta.unique, file = "E:/STATS601/project/id_metadata.unique.txt",quote = FALSE, col.names = TRUE, sep = "\t")
+saveRDS(meta.unique, file = "E:/STATS601/project/processed/meta.unique.rds")
+```
+
+45464 -> 45436
+
+2. Organize Genre into 1-0 matrix
+```{r}
+library(jsonlite)
+```
+
+```{r}
+genre <- read.table("E:/STATS601/project/id_genre.txt", header = TRUE, sep = "\t", quote = "", comment.char = "")
+genre <- genre[!duplicated(genre$id),]
+```
+
+```{r}
+genre.types <- c()
+for(i in c(1:dim(genre)[1])){
+  g <- genre$genres[i]
+  g.str <- gsub("[][]", "", g)
+  g.r <- unlist(strsplit(g.str, "\'"))
+  names.pos <- which(g.r=="name")+2
+  types <- g.r[names.pos]
+  genre.types <- c(genre.types, types)
+}
+genre.type.unique <- unique(genre.types)
+```
+
+```{r}
+genre.mat <- matrix(0, nrow=dim(genre)[1], ncol=length(genre.type.unique))
+colnames(genre.mat) <- genre.type.unique
+for(i in c(1:dim(genre)[1])){
+  g <- genre$genres[i]
+  g.str <- gsub("[][]", "", g)
+  g.r <- unlist(strsplit(g.str, "\'"))
+  names.pos <- which(g.r=="name")+2
+  types <- g.r[names.pos]
+  genre.mat[i, types]=1
+}
+genre.df <- as.data.frame(genre.mat)
+rownames(genre.df) <- genre$id
+saveRDS(genre.df, file = "E:/STATS601/project/processed/genre.mat.rds")
+```
+
+3. Producing companies
+```{r}
+procomp <- read.table("E:/STATS601/project/id_productionCompany.txt", header = TRUE, sep = "\t", quote = "", comment.char = "")
+procomp <- procomp[!duplicated(procomp$id),]
+```
+
+```{r}
+companies <- c()
+for(i in c(1:dim(procomp)[1])){
+  g <- procomp$production_companies[i]
+  g.str <- gsub("[][]", "", g)
+  g.r <- unlist(strsplit(g.str, "\'"))
+  names.pos <- which(g.r=="name")+2
+  comp <- g.r[names.pos]
+  companies <- c(companies, comp)
+}
+companies.unique <- unique(companies)
+```
+
+```{r}
+id_prodcomp <- c()
+for(i in c(1:dim(procomp)[1])){
+  g <- procomp$production_companies[i]
+  g.str <- gsub("[][]", "", g)
+  g.r <- unlist(strsplit(g.str, "\'"))
+  names.pos <- which(g.r=="name")+2
+  comp <- g.r[names.pos]
+  comp <- comp[comp!=""]
+  if(sum(comp=="")>0){
+    print(i)
+  }
+  comp <- paste0(comp, collapse = "|")
+  id_prodcomp <- rbind(id_prodcomp, c(procomp$id[i], comp))
+}
+saveRDS(id_prodcomp, file = "E:/STATS601/project/processed/id_prodcomp.rds")
+```
+
+
+4. Producing countries
+```{r}
+prodcon <- read.table("E:/STATS601/project/id_productionCountries.txt", header = TRUE, sep = "\t", quote = "", comment.char = "")
+prodcon <- prodcon[!duplicated(prodcon$id),]
+```
+
+```{r}
+countries <- c()
+for(i in c(1:dim(prodcon)[1])){
+  g <- prodcon$production_countries[i]
+  g.str <- gsub("[][]", "", g)
+  g.r <- unlist(strsplit(g.str, "\'"))
+  names.pos <- which(g.r=="iso_3166_1")+2
+  con <- g.r[names.pos]
+  countries <- c(countries, con)
+}
+countries.unique <- unique(countries)
+```
+
+```{r}
+country.mat <- matrix(0, nrow=dim(prodcon)[1], ncol=length(countries.unique))
+colnames(country.mat) <- countries.unique
+for(i in c(1:dim(prodcon)[1])){
+  g <- prodcon$production_countries[i]
+  g.str <- gsub("[][]", "", g)
+  g.r <- unlist(strsplit(g.str, "\'"))
+  names.pos <- which(g.r=="iso_3166_1")+2
+  types <- g.r[names.pos]
+  country.mat[i, types]=1
+}
+country.df <- as.data.frame(country.mat)
+rownames(country.df) <- prodcon$id
+saveRDS(country.df, file = "E:/STATS601/project/processed/country.mat.rds")
+```
+
+5. Keywords
+```{r}
+keyw <- read.table("E:/STATS601/project/id_keywords.txt", header = TRUE, sep = "\t", quote = "", comment.char = "", stringsAsFactors = FALSE)
+keyw <- keyw[!duplicated(keyw$id),]
+kws <- c()
+for(i in c(1:dim(keyw)[1])){
+  g <- keyw$keywords[i]
+  g.r <- unlist(strsplit(g, "[\'\"]"))
+  names.pos <- which(g.r=="name")+2
+  kw <- g.r[names.pos]
+  kw <- kw[kw!=""]
+  kws <- c(kws, kw)
+}
+```
+
+```{r}
+kws.5 <- names(which(table(kws)>=5))
+```
+
+```{r}
+keyw.mat <- matrix(0, nrow=dim(keyw)[1], ncol=length(kws.5))
+colnames(keyw.mat) <- kws.5
+for(i in c(1:dim(keyw)[1])){
+  g <- keyw$keywords[i]
+  g.r <- unlist(strsplit(g, "[\'\"]"))
+  names.pos <- which(g.r=="name")+2
+  kw <- g.r[names.pos]
+  kw <- kw[kw %in% kws.5]
+  keyw.mat[i, kw] <- 1
+}
+keyw.df <- as.data.frame(keyw.mat)
+rownames(keyw.df) <- as.character(keyw$id)
+saveRDS(keyw.df, file = "E:/STATS601/project/processed/keyw.mat.rds")
+```
+

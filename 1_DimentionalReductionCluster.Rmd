@@ -1,0 +1,236 @@
+1. Read in keyword
+```{r}
+library(FactoMineR)
+library(factoextra)
+```
+
+```{r}
+prodcomp <- readRDS("E:/STATS601/project/processed/id_prodcomp.rds")
+prodcomp <- as.data.frame(prodcomp)
+colnames(prodcomp) <- c("id", "production")
+rownames(prodcomp) <- prodcomp$id
+```
+
+```{r}
+prodcomp$netflix <- grepl("netflix", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$universal <- grepl("universal|hulu|dreamworks|focus", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$paramount <- grepl("paramount", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$amazon <- grepl("amazon", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$sony <- grepl("sony", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$columbia <- grepl("columbia", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$fox <- grepl("fox", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$disney <- grepl("disney|pixar", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$hbo <- grepl("hbo", prodcomp$production, ignore.case = TRUE)
+
+prodcomp$bros <- grepl("Bro.", prodcomp$production, ignore.case = TRUE)
+```
+
+
+```{r}
+keyw.mat <- readRDS("E:/STATS601/project/processed/keyw.mat.rds")
+genre.mat <- readRDS("E:/STATS601/project/processed/genre.mat.rds")
+```
+
+remove zeros
+```{r}
+keyw.zeros <- apply(keyw.mat,1,sum)
+keyw.numb <- apply(keyw.mat,2,sum)
+summary(keyw.numb)
+```
+
+Filter keywords and movies
+```{r}
+keyw.mat.trimmed <- keyw.mat[,keyw.numb>=50]
+keyw.zeros <- apply(keyw.mat.trimmed,1,sum)
+keyw.mat.trimmed <- keyw.mat.trimmed[keyw.zeros>=5,]
+```
+```{r}
+keyw.mat.trimmed.factor <- keyw.mat.trimmed
+cls <- colnames(keyw.mat.trimmed)
+keyw.mat.trimmed.factor[,cls] <- lapply(keyw.mat.trimmed[,cls],factor)
+```
+
+Run MCA
+```{r}
+res.mca <- MCA(keyw.mat.trimmed.factor, ncp = 10, graph = FALSE)
+```
+
+Scree plot
+```{r fig.height=5, fig.width=6}
+fviz_screeplot(res.mca)
+```
+
+factor map
+```{r}
+plot(res.mca)
+```
+
+Annotated genres for post filter movies
+```{r}
+ani <- genre.mat[rownames(keyw.mat.trimmed),]
+apply(ani,2,sum)
+```
+
+Calculating correlation between MCA components and annotated genres.
+```{r}
+genre.dim.cor <- cor(ani, res.mca$ind$coord)^2
+```
+
+```{r fig.height=5, fig.width=5}
+df <- data.frame(genre.dim.cor)
+colnames(genre.dim.cor) <- paste0("Dim_",c(1:10))
+ggplot(df, aes(Dim_2, Dim_8)) + geom_text(aes(label=rownames(df)), size=4)
+#plot(genre.dim.cor[,c(1,3)])
+#text(genre.dim.cor[,c(1,3)], rownames(genre.dim.cor))
+```
+
+
+Cluster by actors
+```{r}
+cast <- read.table("E:/STATS601/project/processed/cast10_director.txt", header = TRUE, sep="|", quote = "", comment.char = "")
+colnames(cast) <- c("id", "director","actors")
+cast <- cast[!duplicated(cast$id),]
+```
+
+```{r}
+actors <- c()
+for(i in c(1:dim(cast)[1])){
+  acts <- cast$actors[i]
+  acts <- unlist(strsplit(as.character(acts), "\\$"))
+  actors <- c(actors, acts)
+}
+```
+
+Filter actors
+```{r}
+actors.10 <- names(which(table(actors)>=10))
+```
+
+```{r}
+act.mat <- matrix(0, nrow=dim(cast)[1], ncol=length(actors.10))
+colnames(act.mat) <- actors.10
+for(i in c(1:dim(cast)[1])){
+  if(i %% 5000==0){
+    print(i)
+  }
+  acts <- cast$actors[i]
+  acts <- unlist(strsplit(as.character(acts), "\\$"))
+  acts <- acts[acts %in% actors.10]
+  act.mat[i, acts]=1
+}
+rownames(act.mat) <- as.character(cast$id)
+```
+
+```{r}
+saveRDS(act.mat, "E:/STATS601/project/processed/actors.mat.rds")
+```
+
+```{r}
+actors.nummovies <- apply(act.mat,2,sum)
+movies.numactors <- apply(act.mat,1,sum)
+```
+
+```{r}
+act.mat.trimmed <- act.mat[movies.numactors>=6, actors.nummovies>=40]
+```
+
+```{r}
+act.mca <- MCA(act.mat.trimmed>0, ncp = 10, graph = FALSE)
+```
+
+```{r}
+fviz_screeplot(act.mca)
+```
+
+```{r}
+act.genres <- genre.mat[rownames(act.mat.trimmed),]
+apply(act.genres,2,sum)
+```
+
+```{r fig.height=6, fig.width=6}
+prod = prodcomp[rownames(act.mat.trimmed),"columbia"]
+plot(act.mca$ind$coord[,c(1,2)], col=as.factor(prod))
+plot(act.mca$ind$coord[,c(3,4)], col=as.factor(prod))
+plot(act.mca$ind$coord[,c(5,6)], col=as.factor(prod))
+```
+
+
+
+```{r}
+actor.dim.cor <- cor(act.genres, act.mca$ind$coord)^2
+```
+
+```{r fig.height=6, fig.width=6}
+plot(actor.dim.cor[,c(1,2)])
+text(actor.dim.cor[,c(1,2)], rownames(genre.dim.cor))
+```
+
+```{r}
+apply(actor.dim.cor,1,which.max)
+apply(actor.dim.cor,1,max)
+```
+
+Clustering
+```{r}
+library("Rmixmod")
+```
+
+```{r}
+keyw.clus <- mixmodCluster(keyw.mat.trimmed.factor, nbCluster=6)
+bin.clus <- apply(keyw.clus@bestResult@proba,1,which.max)
+```
+
+```{r}
+keyw.kmeans <- kmeans(keyw.mat.trimmed.factor, centers=4)
+```
+
+
+```{r}
+clus <- apply(keyw.clus@bestResult@proba,1,which.max)
+```
+
+```{r fig.height=6, fig.width=6}
+plot(res.mca$ind$coord[,c(1,2)], col=as.factor(bin.clus))
+plot(res.mca$ind$coord[,c(3,4)], col=as.factor(bin.clus))
+```
+
+```{r}
+clus.cen <- matrix(0, nrow=510, ncol=6)
+for(i in c(1:6)){
+  cen <- keyw.mat.trimmed[bin.clus==i,]
+  cen <- apply(cen,2,mean)
+  clus.cen[,i] <- cen
+}
+rownames(clus.cen) <- colnames(keyw.mat.trimmed)
+```
+
+```{r}
+head(sort(clus.cen[,1], decreasing = TRUE),10)
+cat("--------------------------------\n")
+head(sort(clus.cen[,2], decreasing = TRUE),10)
+cat("--------------------------------\n")
+head(sort(clus.cen[,3], decreasing = TRUE),10)
+cat("--------------------------------\n")
+head(sort(clus.cen[,4], decreasing = TRUE),10)
+cat("--------------------------------\n")
+head(sort(clus.cen[,5], decreasing = TRUE),10)
+cat("--------------------------------\n")
+head(sort(clus.cen[,6], decreasing = TRUE),10)
+cat("--------------------------------\n")
+```
+
+
+```{r fig.width=5, fig.height=6}
+cols <- brewer.pal(n = 6, name = 'Dark2')
+plot_data = plot_ly(x = res.mca$ind$coord[,1], y =res.mca$ind$coord[,2], 
+            z = res.mca$ind$coord[,3], type="scatter3d", mode="markers", size = 1, color = factor(bin.clus), colors = cols)
+plot_data
+```

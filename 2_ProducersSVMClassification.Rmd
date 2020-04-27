@@ -1,0 +1,269 @@
+1. read in meta data
+```{r}
+meta <- readRDS("E:/STATS601/project/processed/meta.unique.rds")
+rownames(meta) <- meta$id
+```
+
+```{r}
+library(randomForest)
+library(ggplot2)
+```
+
+extract useful information
+```{r}
+prod.meta <- meta[,c(4,6,7,8,10)]
+prod.meta <- cbind(prod.meta, genre.mat)
+```
+
+Try random forest
+```{r}
+ids <- rownames(prodcomp)[prodcomp$netflix==TRUE | prodcomp$fox==TRUE]
+df <- data.frame(genre.mat[ids,], netflix=prodcomp[ids,]$netflix*1)
+prod.rf <- randomForest(as.factor(netflix) ~ ., data=df, importance=TRUE)
+```
+
+```{r}
+prod.rf
+importance(prod.rf)
+```
+
+Try SVM
+```{r}
+library(e1071)
+```
+
+```{r}
+ids <- rownames(prodcomp)[prodcomp$disney==TRUE | prodcomp$fox==TRUE]
+df <- data.frame(genre.mat[ids,], disney=prodcomp[ids,]$disney*1)*2-1
+set.seed(1)
+test_samples.ids <- sample(rownames(df),round(dim(df)[1])/3)
+df.test <- df[test_samples.ids,]
+df.train <- df[setdiff(rownames(df), test_samples.ids),]
+prod.svm <- svm(as.factor(disney) ~ ., data = df.train, kernel="linear")
+prod.pred <- predict(prod.svm, df.test)
+mean(prod.pred==df.test$disney)
+table(prod.pred==df.test$disney, df.test$disney)
+```
+
+```{r}
+coef.sort <- sort(coef(prod.svm)[2:21])
+gg.df <- data.frame(Keyword=names(coef.sort), Beta=coef.sort)
+gg.df$Keyword <- factor(gg.df$Keyword, levels=gg.df$Keyword)
+ggplot(data=gg.df) + geom_bar(aes(Keyword, Beta),stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Functions for doing pairwise SVM model, cross validation and calculating error rates
+```{r}
+paircomp <- function(i,j, balance=FALSE, down=TRUE){
+
+#table(df$i)
+if(balance){
+  ids_i <- rownames(prodcomp)[prodcomp[,i]==TRUE & prodcomp[,j]==FALSE]
+  ids_j <- rownames(prodcomp)[prodcomp[,i]==FALSE & prodcomp[,j]==TRUE]
+  i_num = length(ids_i)
+  j_num = length(ids_j)
+  if(i_num > j_num){
+    if(down){
+      ids_i <- sample(ids_i, j_num)
+    }else{
+      ids_j <- sample(ids_j, i_num, replace = TRUE)
+    }
+  }else{
+    if(down){
+      ids_j <- sample(ids_j, i_num)
+    }else{
+      ids_i <- sample(ids_i, j_num, replace = TRUE)
+    }
+  }
+  ids <- c(ids_i, ids_j)
+}else{
+  ids <- rownames(prodcomp)[xor(prodcomp[,i]==TRUE,prodcomp[,j]==TRUE)]
+}
+
+
+df <- data.frame(genre.mat[ids,], i=prodcomp[ids,i]*1)*2-1
+#data split
+samps <- list()
+a <- floor(dim(df)[1]/5)
+for(k in c(1:5)){
+  rest.ids <- setdiff(rownames(df), unlist(samps))
+  if(k < 5){
+    samp.ids <- sample(rest.ids,a)
+  }else{
+    samp.ids <- rest.ids
+  }
+  samps[[k]] <- samp.ids
+}
+
+ers <- c()
+ers1 <- c()
+ers2 <- c()
+coefs <- rep(0,21)
+for(k in c(1:5)){
+  set.seed(k)
+  test_samples.ids <- samps[[k]]
+  df.test <- df[test_samples.ids,]
+  df.train <- df[setdiff(rownames(df), test_samples.ids),]
+  prod.svm <- svm(as.factor(i) ~ ., data = df.train, kernel="linear")
+  prod.pred <- predict(prod.svm, df.test)
+  er <- mean(prod.pred==df.test$i)
+  ers <- c(ers, er)
+  a=table(prod.pred==df.test$i, df.test$i)
+  #print(a)
+  er1 <- a[2,1]/sum(a[,1])
+  er2 <- a[2,2]/sum(a[,2])
+  ers1 <- c(ers1, er1)
+  ers2 <- c(ers2, er2)
+  coefs <- coefs + coef(prod.svm)
+}
+
+er <- mean(ers)
+er1 <- mean(ers1)
+er2 <- mean(ers2)
+if(er>0.8){
+  if(er1>0.8 & er2>0.8){
+    print("Yeah!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    print(i)
+    print(j)
+    print(er)
+    print(er1)
+    print(er2)
+    coef.sort <- sort(coefs[2:21]/5)
+    gg.df <- data.frame(Keyword=names(coef.sort), Beta=coef.sort)
+    gg.df$Keyword <- factor(gg.df$Keyword, levels=gg.df$Keyword)
+    p<-ggplot(data=gg.df) + geom_bar(aes(Keyword, Beta),stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle(paste(i,"vs.",j,"Balanced=",balance))
+    print(p)
+  }
+}
+return(c(er, er1, er2))
+#table(prod.pred==df.test$i, df.test$i)
+}
+```
+
+```{r fig.width=6, fig.height=4}
+comps <- c("netflix","universal","sony","disney","fox","columbia","hbo","bros","paramount")
+done <- c()
+comp.res <- matrix(0, nrow=36, ncol = 9)
+ct = 0
+for(i in comps){
+  for(j in comps){
+    name = paste0(sort(c(i,j)),collapse = "_")
+    if(i == j){
+      next
+    }
+    if(name %in% done){
+      next
+    }else{
+      ers1 <- paircomp(i,j)
+      ers2 <- paircomp(i,j,balance = TRUE)
+      ers3 <- paircomp(i,j,balance = TRUE, down = FALSE)
+      ct = ct+1
+      comp.res[ct, 1:3] = ers1
+      comp.res[ct, 4:6] = ers2
+      comp.res[ct, 7:9] = ers3
+      done <- c(done, name)
+    }
+  }
+}
+```
+
+Extract Actors matrix
+```{r}
+act.mat<- readRDS("E:/STATS601/project/processed/actors.mat.rds")
+actor.nummovies <- apply(act.mat,2,sum)
+```
+
+```{r}
+actors.used <- names(which(actor.nummovies>=5))
+```
+
+Pairwise SVM model for companies using actors as features.
+```{r}
+actor_paircomp <- function(i,j, actors){
+ids <- rownames(prodcomp)[xor(prodcomp[,i]==TRUE,prodcomp[,j]==TRUE)]
+act.mat.trim <- act.mat[ids, actors]
+movie.act.num <- apply(act.mat.trim,1,sum)
+act.mat.trim <- act.mat.trim[movie.act.num>=3,]
+act.movie.num <- apply(act.mat.trim,2,sum)
+act.mat.trim <- act.mat.trim[,names(head(sort(act.movie.num,decreasing = TRUE),100))]
+df <- data.frame(act.mat.trim, i=prodcomp[rownames(act.mat.trim),i]*1)*2-1
+#table(df$i)
+
+#data split
+samps <- list()
+a <- floor(dim(df)[1]/5)
+for(k in c(1:5)){
+  rest.ids <- setdiff(rownames(df), unlist(samps))
+  if(k < 5){
+    samp.ids <- sample(rest.ids,a)
+  }else{
+    samp.ids <- rest.ids
+  }
+  samps[[k]] <- samp.ids
+}
+
+ers <- c()
+ers1 <- c()
+ers2 <- c()
+coefs <- c()
+for(k in c(1:2)){
+  set.seed(k)
+  test_samples.ids <- samps[[k]]
+  df.test <- df[test_samples.ids,]
+  df.train <- df[setdiff(rownames(df), test_samples.ids),]
+  prod.svm <- svm(as.factor(i) ~ ., data = df.train, kernel="linear")
+  prod.pred <- predict(prod.svm, df.test)
+  er <- mean(prod.pred==df.test$i)
+  ers <- c(ers, er)
+  a=table(prod.pred==df.test$i, df.test$i)
+  er1 <- a[2,1]/sum(a[,1])
+  er2 <- a[2,2]/sum(a[,2])
+  ers1 <- c(ers1, er1)
+  ers2 <- c(ers2, er2)
+  if(length(coefs)==0){
+    coefs <- coef(prod.svm)
+  }else{
+    coefs <- coefs + coef(prod.svm)
+  }
+}
+
+er <- mean(ers)
+er1 <- mean(ers1)
+er2 <- mean(ers2)
+if(er>0.6){
+  if(er1>0.6 & er2>0.6){
+    print("Yeah!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    print(i)
+    print(j)
+    print(er)
+    print(er1)
+    print(er2)
+    coef.sort <- sort(coefs[2:21]/5)
+    gg.df <- data.frame(Keyword=names(coef.sort), Beta=coef.sort)
+    gg.df$Keyword <- factor(gg.df$Keyword, levels=gg.df$Keyword)
+    p<-ggplot(data=gg.df) + geom_bar(aes(Keyword, Beta),stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle(paste(i,j,sep = " vs. "))
+    print(p)
+  }
+}
+#table(prod.pred==df.test$i, df.test$i)
+}
+```
+
+```{r}
+comps <- c("netflix","universal","sony","disney","fox","columbia","hbo","bros","paramount")
+done <- c()
+for(i in comps){
+  for(j in comps){
+    name = paste0(sort(c(i,j)),collapse = "_")
+    if(i == j){
+      next
+    }
+    if(name %in% done){
+      next
+    }else{
+      actor_paircomp(i,j, actors = actors.used)
+      done <- c(done, name)
+    }
+  }
+}
+```
