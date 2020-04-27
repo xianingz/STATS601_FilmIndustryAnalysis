@@ -1,10 +1,7 @@
-draw ellipse error plot
-```{r}
+#draw ellipse error plot
+
 library(plotrix)
 library(RColorBrewer)
-```
-
-```{r}
 coln <- unique(unlist(strsplit(coln,"_")))
 convertomat <- function(col, coln){
   mat <- matrix(NA, nrow=length(coln), ncol=length(coln))
@@ -26,9 +23,6 @@ convertomat <- function(col, coln){
   return(mat)
 }
 
-```
-
-```{r}
 plotheat <- function(mat1, mat2, mat3, cols, ns=NULL, tit){
   len <- dim(mat1)[1]
   colfunc <- colorRampPalette(cols)
@@ -55,9 +49,7 @@ plotheat <- function(mat1, mat2, mat3, cols, ns=NULL, tit){
   text(len+1.25, len/4+0.05*50, "0.5", pos = 2, cex=2)
   text(len+1.25, len/4+0.05*100, "1", pos = 2, cex=2)
 }
-```
 
-```{r fig.height=8, fig.width=8}
 mat1 <- convertomat(comp.res[,1],coln)
 mat2 <- convertomat(comp.res[,2],coln)
 mat3 <- convertomat(comp.res[,3],coln)
@@ -65,9 +57,7 @@ pdf("E:/STATS601/project/1.pdf", width = 8, height = 8)
 ns = c("Netflix","Universal","SONY","Disney","FOX","Columbia","HBO","Warner Bros.","Paramount")
 plotheat(mat1,mat2,mat3, cols = c("#236fce","#f2f2f2","#dc392e"), ns=ns)
 dev.off()
-```
 
-```{r fig.height=8, fig.width=24}
 mat1 <- convertomat(comp.res[,1],coln)
 mat2 <- convertomat(comp.res[,2],coln)
 mat3 <- convertomat(comp.res[,3],coln)
@@ -86,4 +76,4 @@ plotheat(mat1,mat2,mat3, cols = c("#236fce","#f2f2f2","#dc392e"), ns=ns, tit = "
 plotheat(mat4,mat5,mat6, cols = c("#236fce","#f2f2f2","#dc392e"), ns=ns, tit = "Subsampled Data")
 plotheat(mat7,mat8,mat9, cols = c("#236fce","#f2f2f2","#dc392e"), ns=ns, tit = "Oversampled Data")
 dev.off()
-```
+
