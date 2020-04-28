@@ -1,0 +1,666 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+setwd("C:\\Users\\Chen\\Documents\\Courses\\STATS 601\\project")
+```
+
+```{r}
+library(fastDummies)
+library(glmnet)
+library(e1071)
+library(randomForest)
+library(neuralnet)
+library(ggplot2)
+```
+
+
+```{r}
+meta_df <- readRDS("process_data/meta.unique.rds")
+```
+
+```{r}
+filtered_meta_df <- meta_df[!(meta_df$budget==0 | meta_df$revenue==0 | meta_df$vote_count==0),]
+filtered_meta_df['yield_rate'] = filtered_meta_df['revenue']/filtered_meta_df['budget']
+filtered_meta_df['release_date'] = as.character(filtered_meta_df[,'release_date'])
+```
+
+```{r}
+get_year <-function(x){
+  return(unlist(strsplit(x, "/"))[3])
+}
+years <- lapply(filtered_meta_df[,'release_date'], get_year)
+filtered_meta_df['year'] <- unlist(years)
+```
+
+```{r}
+filtered_meta_df <- filtered_meta_df[is.na(filtered_meta_df$runtime)==0,]
+filtered_meta_df <- filtered_meta_df[filtered_meta_df$runtime>0,]
+filtered_meta_df <- filtered_meta_df[filtered_meta_df$budget>100,]
+filtered_meta_df <- filtered_meta_df[filtered_meta_df$revenue>100,]
+filtered_meta_df <- filtered_meta_df[filtered_meta_df$yield_rate<100000,]
+```
+
+```{r}
+new_meta_df <- dummy_columns(filtered_meta_df, select_columns = c("original_language"))
+final_df <- subset(new_meta_df, select = -c(id, imdb_id, release_date, title, original_language))
+```
+
+
+
+```{r}
+# linear model - elastic net
+# vote
+
+vote_y <- final_df$vote_average
+vote_x <- data.matrix(final_df[,-c(5,6)])
+vote_lm <- cv.glmnet(vote_x, vote_y)
+best_lambda <- vote_lm$lambda[which.min(vote_lm$cvm)]
+vote_y_predict <- predict(vote_lm$glmnet.fit, s=best_lambda, newx = vote_x)
+```
+
+```{r fig.width=4, fig.height=4}
+vote_lm_pred_df <- data.frame(vote_y, vote_y_predict)
+colnames(vote_lm_pred_df) <- c("real_vote", "predict_vote")
+ggplot(vote_lm_pred_df) + geom_point(mapping = aes(x=real_vote, y=predict_vote)) +
+  xlim(0,10) + ylim(0,10) 
+```
+
+
+
+```{r}
+plot(vote_y, vote_y_predict, xlim=c(0,10), ylim=c(0,10))
+```
+
+
+```{r}
+# yield rate
+yield_y <- final_df$yield_rate
+yield_x <- data.matrix(final_df[,-c(3,7)])
+yield_lm <- cv.glmnet(yield_x, yield_y_log)
+best_lambda <- yield_lm$lambda[which.min(yield_lm$cvm)]
+yield_y_predict <- predict(yield_lm$glmnet.fit, s=best_lambda, newx = yield_x)
+```
+
+
+```{r fig.width=4, fig.height=4}
+yield_lm_pred_df <- data.frame(yield_y, yield_y_predict)
+colnames(yield_lm_pred_df) <- c("real_yield", "predict_yield")
+
+ggplot(yield_lm_pred_df) + geom_point(mapping = aes(x=real_yield, y=predict_yield)) +
+  scale_x_log10() + scale_y_log10()
+```
+
+```{r}
+
+plot(yield_y, yield_y_predict,ylim = c(0,12))
+```
+
+
+
+
+
+
+```{r}
+# yield rate
+yield_y_log <- log(final_df$yield_rate)
+yield_x <- data.matrix(final_df[,-c(7)])
+yield_lm <- cv.glmnet(yield_x, yield_y_log)
+best_lambda <- yield_lm$lambda[which.min(yield_lm$cvm)]
+yield_y_predict_log <- predict(yield_lm$glmnet.fit, s=best_lambda, newx = yield_x)
+```
+
+
+```{r}
+
+plot(yield_y_log, yield_y_predict_log, ylim=c(-10,10), xlim=c(-10,10))
+```
+
+
+
+
+
+
+
+```{r}
+# RF
+# vote
+vote_df <- final_df[,-c(6)]
+vote_rf <- randomForest(vote_average ~. , data=vote_df,importance=TRUE, ntree=500)
+vote_predict_rf <- predict(vote_rf, newdata = vote_df)
+
+```
+
+
+```{r fig.width=4, fig.height=4}
+vote_rf_pred_df <- data.frame(final_df$vote_average, vote_predict_rf)
+colnames(vote_rf_pred_df) <- c("real_vote", "predict_vote")
+ggplot(vote_rf_pred_df) + geom_point(mapping = aes(x=real_vote, y=predict_vote)) +
+  xlim(0,10) + ylim(0,10) 
+```
+
+
+```{r}
+vote_imp <- importance(vote_rf)
+head(rownames(vote_imp[order(vote_imp[,2], decreasing = TRUE),]),7)
+```
+
+
+
+
+```{r}
+# yield rate
+yield_df <- final_df[-c(3)]
+yield_rf <- randomForest(yield_rate ~. , data=yield_df,importance=TRUE, ntree=500)
+yield_predict_rf <- predict(yield_rf, newdata = yield_df)
+
+```
+
+
+```{r fig.width=4, fig.height=4}
+yield_rf_pred_df <- data.frame(final_df$yield_rate, yield_predict_rf)
+colnames(yield_rf_pred_df) <- c("real_yield", "predict_yield")
+ggplot(yield_rf_pred_df) + geom_point(mapping = aes(x=real_yield, y=predict_yield)) +
+  scale_x_log10() + scale_y_log10()
+```
+
+
+
+```{r}
+yield_imp <- importance(yield_rf)
+head(rownames(yield_imp[order(yield_imp[,2], decreasing = TRUE),]),7)
+```
+
+
+
+
+```{r}
+# neural network 
+# vote
+vote_nn <- neuralnet(vote_average ~. , data=final_df, hidden=10)
+vote_predict_nn <- predict(vote_nn, newdata = final_df)
+
+```
+
+
+
+```{r}
+lang_tables = table(filtered_meta_df$original_language)
+lt10_lang = lang_tables[lang_tables>=10]
+lt10_lang
+```
+
+
+
+
+```{r}
+vote_lang_df <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(vote_lang_df) <- c("language", "feature", "value")
+yield_lang_df <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(yield_lang_df) <- c("language", "feature", "value")
+vote_feature_list <- c("popularity" ,"budget" ,"revenue" ,"runtime", "yield_rate", "year")
+yield_feature_list <- c("popularity" ,"budget" ,"runtime","vote_count" ,"vote_average","year")
+```
+
+
+
+
+
+```{r}
+#zh-cn
+zh_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="cn" | filtered_meta_df$original_language=="zh",]
+zh_df <- subset(zh_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+zh_vote_df <- zh_df[-c(6)]
+zh_yield_df <- zh_df[-c(3)]
+
+#vote
+zh_vote_rf <- randomForest(vote_average ~. , data=zh_df, importance=TRUE, ntree=500)
+zh_vote_imp <- importance(zh_vote_rf)[vote_feature_list,]
+zh_vote_imp_df <- data.frame(zh_vote_imp)
+zh_vote_imp_df$feature <- vote_feature_list
+rownames(zh_vote_imp_df) <- c()
+zh_vote_imp_df <- zh_vote_imp_df[-c(1)]
+colnames(zh_vote_imp_df)[1] <- "value"
+zh_vote_imp_df$language <- "cn"
+zh_vote_imp_df$value <- zh_vote_imp_df$value/sum(zh_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, zh_vote_imp_df)
+
+
+#yield 
+zh_yield_rf <- randomForest(yield_rate ~. , data=zh_df, importance=TRUE, ntree=500)
+zh_yield_imp <- importance(zh_yield_rf)[yield_feature_list,]
+zh_yield_imp_df <- data.frame(zh_yield_imp)
+zh_yield_imp_df$feature <- yield_feature_list
+rownames(zh_yield_imp_df) <- c()
+zh_yield_imp_df <- zh_yield_imp_df[-c(1)]
+colnames(zh_yield_imp_df)[1] <- "value"
+zh_yield_imp_df$language <- "cn"
+zh_yield_imp_df$value <- zh_yield_imp_df$value/sum(zh_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, zh_yield_imp_df)
+```
+
+
+
+```{r}
+#da
+da_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="da",]
+da_df <- subset(da_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+da_vote_df <- da_df[-c(6)]
+da_yield_df <- da_df[-c(3)]
+
+#vote
+da_vote_rf <- randomForest(vote_average ~. , data=da_df, importance=TRUE, ntree=500)
+da_vote_imp <- importance(da_vote_rf)[vote_feature_list,]
+da_vote_imp_df <- data.frame(da_vote_imp)
+da_vote_imp_df$feature <- vote_feature_list
+rownames(da_vote_imp_df) <- c()
+da_vote_imp_df <- da_vote_imp_df[-c(1)]
+colnames(da_vote_imp_df)[1] <- "value"
+da_vote_imp_df$language <- "da"
+da_vote_imp_df$value <- da_vote_imp_df$value/sum(da_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, da_vote_imp_df)
+
+
+#yield 
+da_yield_rf <- randomForest(yield_rate ~. , data=da_df, importance=TRUE, ntree=500)
+da_yield_imp <- importance(da_yield_rf)[yield_feature_list,]
+da_yield_imp_df <- data.frame(da_yield_imp)
+da_yield_imp_df$feature <- yield_feature_list
+rownames(da_yield_imp_df) <- c()
+da_yield_imp_df <- da_yield_imp_df[-c(1)]
+colnames(da_yield_imp_df)[1] <- "value"
+da_yield_imp_df$language <- "da"
+da_yield_imp_df$value <- da_yield_imp_df$value/sum(da_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, da_yield_imp_df)
+```
+
+
+
+```{r}
+#de
+de_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="de",]
+de_df <- subset(de_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+de_vote_df <- de_df[-c(6)]
+de_yield_df <- de_df[-c(3)]
+
+#vote
+de_vote_rf <- randomForest(vote_average ~. , data=de_df, importance=TRUE, ntree=500)
+de_vote_imp <- importance(de_vote_rf)[vote_feature_list,]
+de_vote_imp_df <- data.frame(de_vote_imp)
+de_vote_imp_df$feature <- vote_feature_list
+rownames(de_vote_imp_df) <- c()
+de_vote_imp_df <- de_vote_imp_df[-c(1)]
+colnames(de_vote_imp_df)[1] <- "value"
+de_vote_imp_df$language <- "de"
+de_vote_imp_df$value <- de_vote_imp_df$value/sum(de_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, de_vote_imp_df)
+
+
+#yield 
+de_yield_rf <- randomForest(yield_rate ~. , data=de_df, importance=TRUE, ntree=500)
+de_yield_imp <- importance(de_yield_rf)[yield_feature_list,]
+de_yield_imp_df <- data.frame(de_yield_imp)
+de_yield_imp_df$feature <- yield_feature_list
+rownames(de_yield_imp_df) <- c()
+de_yield_imp_df <- de_yield_imp_df[-c(1)]
+colnames(de_yield_imp_df)[1] <- "value"
+de_yield_imp_df$language <- "de"
+de_yield_imp_df$value <- de_yield_imp_df$value/sum(de_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, de_yield_imp_df)
+```
+
+
+
+```{r}
+#en
+en_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="en",]
+en_df <- subset(en_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+en_vote_df <- en_df[-c(6)]
+en_yield_df <- en_df[-c(3)]
+
+#vote
+en_vote_rf <- randomForest(vote_average ~. , data=en_df, importance=TRUE, ntree=500)
+en_vote_imp <- importance(en_vote_rf)[vote_feature_list,]
+en_vote_imp_df <- data.frame(en_vote_imp)
+en_vote_imp_df$feature <- vote_feature_list
+rownames(en_vote_imp_df) <- c()
+en_vote_imp_df <- en_vote_imp_df[-c(1)]
+colnames(en_vote_imp_df)[1] <- "value"
+en_vote_imp_df$language <- "en"
+en_vote_imp_df$value <- en_vote_imp_df$value/sum(en_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, en_vote_imp_df)
+
+
+#yield 
+en_yield_rf <- randomForest(yield_rate ~. , data=en_df, importance=TRUE, ntree=500)
+en_yield_imp <- importance(en_yield_rf)[yield_feature_list,]
+en_yield_imp_df <- data.frame(en_yield_imp)
+en_yield_imp_df$feature <- yield_feature_list
+rownames(en_yield_imp_df) <- c()
+en_yield_imp_df <- en_yield_imp_df[-c(1)]
+colnames(en_yield_imp_df)[1] <- "value"
+en_yield_imp_df$language <- "en"
+en_yield_imp_df$value <- en_yield_imp_df$value/sum(en_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, en_yield_imp_df)
+```
+
+
+
+```{r}
+#es
+es_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="es",]
+es_df <- subset(es_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+es_vote_df <- es_df[-c(6)]
+es_yield_df <- es_df[-c(3)]
+
+#vote
+es_vote_rf <- randomForest(vote_average ~. , data=es_df, importance=TRUE, ntree=500)
+es_vote_imp <- importance(es_vote_rf)[vote_feature_list,]
+es_vote_imp_df <- data.frame(es_vote_imp)
+es_vote_imp_df$feature <- vote_feature_list
+rownames(es_vote_imp_df) <- c()
+es_vote_imp_df <- es_vote_imp_df[-c(1)]
+colnames(es_vote_imp_df)[1] <- "value"
+es_vote_imp_df$language <- "es"
+es_vote_imp_df$value <- es_vote_imp_df$value/sum(es_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, es_vote_imp_df)
+
+
+#yield 
+es_yield_rf <- randomForest(yield_rate ~. , data=es_df, importance=TRUE, ntree=500)
+es_yield_imp <- importance(es_yield_rf)[yield_feature_list,]
+es_yield_imp_df <- data.frame(es_yield_imp)
+es_yield_imp_df$feature <- yield_feature_list
+rownames(es_yield_imp_df) <- c()
+es_yield_imp_df <- es_yield_imp_df[-c(1)]
+colnames(es_yield_imp_df)[1] <- "value"
+es_yield_imp_df$language <- "es"
+es_yield_imp_df$value <- es_yield_imp_df$value/sum(es_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, es_yield_imp_df)
+```
+
+
+```{r}
+#fr
+fr_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="fr",]
+fr_df <- subset(fr_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+fr_vote_df <- fr_df[-c(6)]
+fr_yield_df <- fr_df[-c(3)]
+
+#vote
+fr_vote_rf <- randomForest(vote_average ~. , data=fr_df, importance=TRUE, ntree=500)
+fr_vote_imp <- importance(fr_vote_rf)[vote_feature_list,]
+fr_vote_imp_df <- data.frame(fr_vote_imp)
+fr_vote_imp_df$feature <- vote_feature_list
+rownames(fr_vote_imp_df) <- c()
+fr_vote_imp_df <- fr_vote_imp_df[-c(1)]
+colnames(fr_vote_imp_df)[1] <- "value"
+fr_vote_imp_df$language <- "fr"
+fr_vote_imp_df$value <- fr_vote_imp_df$value/sum(fr_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, fr_vote_imp_df)
+
+
+#yield 
+fr_yield_rf <- randomForest(yield_rate ~. , data=fr_df, importance=TRUE, ntree=500)
+fr_yield_imp <- importance(fr_yield_rf)[yield_feature_list,]
+fr_yield_imp_df <- data.frame(fr_yield_imp)
+fr_yield_imp_df$feature <- yield_feature_list
+rownames(fr_yield_imp_df) <- c()
+fr_yield_imp_df <- fr_yield_imp_df[-c(1)]
+colnames(fr_yield_imp_df)[1] <- "value"
+fr_yield_imp_df$language <- "fr"
+fr_yield_imp_df$value <- fr_yield_imp_df$value/sum(fr_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, fr_yield_imp_df)
+```
+
+
+```{r}
+#hi
+hi_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="hi",]
+hi_df <- subset(hi_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+hi_vote_df <- hi_df[-c(6)]
+hi_yield_df <- hi_df[-c(3)]
+
+#vote
+hi_vote_rf <- randomForest(vote_average ~. , data=hi_df, importance=TRUE, ntree=500)
+hi_vote_imp <- importance(hi_vote_rf)[vote_feature_list,]
+hi_vote_imp_df <- data.frame(hi_vote_imp)
+hi_vote_imp_df$feature <- vote_feature_list
+rownames(hi_vote_imp_df) <- c()
+hi_vote_imp_df <- hi_vote_imp_df[-c(1)]
+colnames(hi_vote_imp_df)[1] <- "value"
+hi_vote_imp_df$language <- "hi"
+hi_vote_imp_df$value <- hi_vote_imp_df$value/sum(hi_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, hi_vote_imp_df)
+
+
+#yield 
+hi_yield_rf <- randomForest(yield_rate ~. , data=hi_df, importance=TRUE, ntree=500)
+hi_yield_imp <- importance(hi_yield_rf)[yield_feature_list,]
+hi_yield_imp_df <- data.frame(hi_yield_imp)
+hi_yield_imp_df$feature <- yield_feature_list
+rownames(hi_yield_imp_df) <- c()
+hi_yield_imp_df <- hi_yield_imp_df[-c(1)]
+colnames(hi_yield_imp_df)[1] <- "value"
+hi_yield_imp_df$language <- "hi"
+hi_yield_imp_df$value <- hi_yield_imp_df$value/sum(hi_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, hi_yield_imp_df)
+```
+
+
+```{r}
+#it
+it_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="it",]
+it_df <- subset(it_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+it_vote_df <- it_df[-c(6)]
+it_yield_df <- it_df[-c(3)]
+
+#vote
+it_vote_rf <- randomForest(vote_average ~. , data=it_df, importance=TRUE, ntree=500)
+it_vote_imp <- importance(it_vote_rf)[vote_feature_list,]
+it_vote_imp_df <- data.frame(it_vote_imp)
+it_vote_imp_df$feature <- vote_feature_list
+rownames(it_vote_imp_df) <- c()
+it_vote_imp_df <- it_vote_imp_df[-c(1)]
+colnames(it_vote_imp_df)[1] <- "value"
+it_vote_imp_df$language <- "it"
+it_vote_imp_df$value <- it_vote_imp_df$value/sum(it_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, it_vote_imp_df)
+
+
+#yield 
+it_yield_rf <- randomForest(yield_rate ~. , data=it_df, importance=TRUE, ntree=500)
+it_yield_imp <- importance(it_yield_rf)[yield_feature_list,]
+it_yield_imp_df <- data.frame(it_yield_imp)
+it_yield_imp_df$feature <- yield_feature_list
+rownames(it_yield_imp_df) <- c()
+it_yield_imp_df <- it_yield_imp_df[-c(1)]
+colnames(it_yield_imp_df)[1] <- "value"
+it_yield_imp_df$language <- "it"
+it_yield_imp_df$value <- it_yield_imp_df$value/sum(it_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, it_yield_imp_df)
+```
+
+
+```{r}
+#ja
+ja_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="ja",]
+ja_df <- subset(ja_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+ja_vote_df <- ja_df[-c(6)]
+ja_yield_df <- ja_df[-c(3)]
+
+#vote
+ja_vote_rf <- randomForest(vote_average ~. , data=ja_df, importance=TRUE, ntree=500)
+ja_vote_imp <- importance(ja_vote_rf)[vote_feature_list,]
+ja_vote_imp_df <- data.frame(ja_vote_imp)
+ja_vote_imp_df$feature <- vote_feature_list
+rownames(ja_vote_imp_df) <- c()
+ja_vote_imp_df <- ja_vote_imp_df[-c(1)]
+colnames(ja_vote_imp_df)[1] <- "value"
+ja_vote_imp_df$language <- "ja"
+ja_vote_imp_df$value <- ja_vote_imp_df$value/sum(ja_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, ja_vote_imp_df)
+
+
+#yield 
+ja_yield_rf <- randomForest(yield_rate ~. , data=ja_df, importance=TRUE, ntree=500)
+ja_yield_imp <- importance(ja_yield_rf)[yield_feature_list,]
+ja_yield_imp_df <- data.frame(ja_yield_imp)
+ja_yield_imp_df$feature <- yield_feature_list
+rownames(ja_yield_imp_df) <- c()
+ja_yield_imp_df <- ja_yield_imp_df[-c(1)]
+colnames(ja_yield_imp_df)[1] <- "value"
+ja_yield_imp_df$language <- "ja"
+ja_yield_imp_df$value <- ja_yield_imp_df$value/sum(ja_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, ja_yield_imp_df)
+```
+
+
+
+```{r}
+#ko
+ko_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="ko",]
+ko_df <- subset(ko_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+ko_vote_df <- ko_df[-c(6)]
+ko_yield_df <- ko_df[-c(3)]
+
+#vote
+ko_vote_rf <- randomForest(vote_average ~. , data=ko_df, importance=TRUE, ntree=500)
+ko_vote_imp <- importance(ko_vote_rf)[vote_feature_list,]
+ko_vote_imp_df <- data.frame(ko_vote_imp)
+ko_vote_imp_df$feature <- vote_feature_list
+rownames(ko_vote_imp_df) <- c()
+ko_vote_imp_df <- ko_vote_imp_df[-c(1)]
+colnames(ko_vote_imp_df)[1] <- "value"
+ko_vote_imp_df$language <- "ko"
+ko_vote_imp_df$value <- ko_vote_imp_df$value/sum(ko_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, ko_vote_imp_df)
+
+
+#yield 
+ko_yield_rf <- randomForest(yield_rate ~. , data=ko_df, importance=TRUE, ntree=500)
+ko_yield_imp <- importance(ko_yield_rf)[yield_feature_list,]
+ko_yield_imp_df <- data.frame(ko_yield_imp)
+ko_yield_imp_df$feature <- yield_feature_list
+rownames(ko_yield_imp_df) <- c()
+ko_yield_imp_df <- ko_yield_imp_df[-c(1)]
+colnames(ko_yield_imp_df)[1] <- "value"
+ko_yield_imp_df$language <- "ko"
+ko_yield_imp_df$value <- ko_yield_imp_df$value/sum(ko_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, ko_yield_imp_df)
+```
+
+
+```{r}
+#ml
+ml_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="ml",]
+ml_df <- subset(ml_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+ml_vote_df <- ml_df[-c(6)]
+ml_yield_df <- ml_df[-c(3)]
+
+#vote
+ml_vote_rf <- randomForest(vote_average ~. , data=ml_df, importance=TRUE, ntree=500)
+ml_vote_imp <- importance(ml_vote_rf)[vote_feature_list,]
+ml_vote_imp_df <- data.frame(ml_vote_imp)
+ml_vote_imp_df$feature <- vote_feature_list
+rownames(ml_vote_imp_df) <- c()
+ml_vote_imp_df <- ml_vote_imp_df[-c(1)]
+colnames(ml_vote_imp_df)[1] <- "value"
+ml_vote_imp_df$language <- "ml"
+ml_vote_imp_df$value <- ml_vote_imp_df$value/sum(ml_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, ml_vote_imp_df)
+
+
+#yield 
+ml_yield_rf <- randomForest(yield_rate ~. , data=ml_df, importance=TRUE, ntree=500)
+ml_yield_imp <- importance(ml_yield_rf)[yield_feature_list,]
+ml_yield_imp_df <- data.frame(ml_yield_imp)
+ml_yield_imp_df$feature <- yield_feature_list
+rownames(ml_yield_imp_df) <- c()
+ml_yield_imp_df <- ml_yield_imp_df[-c(1)]
+colnames(ml_yield_imp_df)[1] <- "value"
+ml_yield_imp_df$language <- "ml"
+ml_yield_imp_df$value <- ml_yield_imp_df$value/sum(ml_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, ml_yield_imp_df)
+```
+
+
+```{r}
+#ru
+ru_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="ru",]
+ru_df <- subset(ru_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+ru_vote_df <- ru_df[-c(6)]
+ru_yield_df <- ru_df[-c(3)]
+
+#vote
+ru_vote_rf <- randomForest(vote_average ~. , data=ru_df, importance=TRUE, ntree=500)
+ru_vote_imp <- importance(ru_vote_rf)[vote_feature_list,]
+ru_vote_imp_df <- data.frame(ru_vote_imp)
+ru_vote_imp_df$feature <- vote_feature_list
+rownames(ru_vote_imp_df) <- c()
+ru_vote_imp_df <- ru_vote_imp_df[-c(1)]
+colnames(ru_vote_imp_df)[1] <- "value"
+ru_vote_imp_df$language <- "ru"
+ru_vote_imp_df$value <- ru_vote_imp_df$value/sum(ru_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, ru_vote_imp_df)
+
+
+#yield 
+ru_yield_rf <- randomForest(yield_rate ~. , data=ru_df, importance=TRUE, ntree=500)
+ru_yield_imp <- importance(ru_yield_rf)[yield_feature_list,]
+ru_yield_imp_df <- data.frame(ru_yield_imp)
+ru_yield_imp_df$feature <- yield_feature_list
+rownames(ru_yield_imp_df) <- c()
+ru_yield_imp_df <- ru_yield_imp_df[-c(1)]
+colnames(ru_yield_imp_df)[1] <- "value"
+ru_yield_imp_df$language <- "ru"
+ru_yield_imp_df$value <- ru_yield_imp_df$value/sum(ru_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, ru_yield_imp_df)
+```
+
+
+```{r}
+#ta
+ta_filtered_df <- filtered_meta_df[filtered_meta_df$original_language=="ta",]
+ta_df <- subset(ta_filtered_df, select = -c(id, imdb_id, release_date, title, original_language))
+ta_vote_df <- ta_df[-c(6)]
+ta_yield_df <- ta_df[-c(3)]
+
+#vote
+ta_vote_rf <- randomForest(vote_average ~. , data=ta_df, importance=TRUE, ntree=500)
+ta_vote_imp <- importance(ta_vote_rf)[vote_feature_list,]
+ta_vote_imp_df <- data.frame(ta_vote_imp)
+ta_vote_imp_df$feature <- vote_feature_list
+rownames(ta_vote_imp_df) <- c()
+ta_vote_imp_df <- ta_vote_imp_df[-c(1)]
+colnames(ta_vote_imp_df)[1] <- "value"
+ta_vote_imp_df$language <- "ta"
+ta_vote_imp_df$value <- ta_vote_imp_df$value/sum(ta_vote_imp_df$value)
+vote_lang_df <- rbind(vote_lang_df, ta_vote_imp_df)
+
+
+#yield 
+ta_yield_rf <- randomForest(yield_rate ~. , data=ta_df, importance=TRUE, ntree=500)
+ta_yield_imp <- importance(ta_yield_rf)[yield_feature_list,]
+ta_yield_imp_df <- data.frame(ta_yield_imp)
+ta_yield_imp_df$feature <- yield_feature_list
+rownames(ta_yield_imp_df) <- c()
+ta_yield_imp_df <- ta_yield_imp_df[-c(1)]
+colnames(ta_yield_imp_df)[1] <- "value"
+ta_yield_imp_df$language <- "ta"
+ta_yield_imp_df$value <- ta_yield_imp_df$value/sum(ta_yield_imp_df$value)
+yield_lang_df <- rbind(yield_lang_df, ta_yield_imp_df)
+```
+
+
+```{r}
+ggplot(data=vote_lang_df, aes(x=language,y=value, fill=feature)) + geom_bar(stat = "identity")
+```
+
+```{r}
+ggplot(data=yield_lang_df, aes(x=language,y=value, fill=feature)) +
+  geom_bar(stat = "identity")
+```
+
